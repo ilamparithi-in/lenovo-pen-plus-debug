@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Title -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Lenovo Pen Plus Debug"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:paddingBottom="8dp" />
+            
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="KeyEvent detection always active"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:textColor="#666666"
+                android:paddingBottom="16dp" />
+
+            <!-- Status Card -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <View
+                            android:id="@+id/statusIndicator"
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:background="@android:color/holo_red_dark"
+                            android:layout_marginEnd="8dp" />
+
+                        <TextView
+                            android:id="@+id/statusText"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Checking status..."
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btnRequestPermission"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Grant Shizuku Permission"
+                        android:visibility="gone"
+                        android:layout_marginTop="8dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <Button
+                            android:id="@+id/btnStartStop"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Start Monitoring"
+                            android:layout_marginEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnClear"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Clear" />
+                    </LinearLayout>
+
+                    <!-- Alternative Detection Test Button -->
+                    <Button
+                        android:id="@+id/btnTestAlternatives"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="🔬 Test Alternative Methods"
+                        android:layout_marginTop="8dp"
+                        android:backgroundTint="#4CAF50"
+                        android:textColor="@android:color/white" />
+
+                </LinearLayout>
+
+            </androidx.cardview.widget.CardView>
+
+            <!-- Last Event Card -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/lastEventCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp"
+                app:cardBackgroundColor="#E3F2FD">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="LAST DETECTED EVENT"
+                        android:textSize="12sp"
+                        android:textColor="#666666"
+                        android:paddingBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/lastEventType"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Triple Click"
+                        android:textSize="32sp"
+                        android:textStyle="bold"
+                        android:textColor="#1976D2" />
+
+                    <TextView
+                        android:id="@+id/lastEventTimestamp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="10:30:45.123"
+                        android:textSize="16sp"
+                        android:paddingTop="4dp" />
+
+                    <TextView
+                        android:id="@+id/lastEventConfidence"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="DIRECT — via logcat"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:paddingTop="8dp" />
+
+                    <TextView
+                        android:id="@+id/lastEventKeycode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Keycode: 602"
+                        android:textSize="12sp"
+                        android:textColor="#666666"
+                        android:paddingTop="4dp" />
+
+                </LinearLayout>
+
+            </androidx.cardview.widget.CardView>
+
+            <!-- Event History Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="EVENT HISTORY BY METHOD"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:id="@+id/noEventsText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No events detected yet.\n\nPress stylus buttons - KeyEvent detection is always active!\n\nOptional: Enable Shizuku for logcat detection."
+                android:textSize="14sp"
+                android:textColor="#999999"
+                android:gravity="center"
+                android:padding="32dp" />
+
+            <!-- Columnar Event Display -->
+            <HorizontalScrollView
+                android:id="@+id/eventColumnsScroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone">
+                
+                <LinearLayout
+                    android:id="@+id/eventColumnsContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="8dp" />
+                    
+            </HorizontalScrollView>
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,234 @@
+diff --git a/app/src/main/java/com/termux/x11/LorieView.java b/app/src/main/java/com/termux/x11/LorieView.java
+index 0000000..0000000 100644
+--- a/app/src/main/java/com/termux/x11/LorieView.java
++++ b/app/src/main/java/com/termux/x11/LorieView.java
+@@ -49,6 +49,7 @@ import androidx.core.math.MathUtils;
+ import com.termux.x11.input.InputEventSender;
+ import com.termux.x11.input.InputStub;
+ import com.termux.x11.input.TouchInputHandler;
++import com.termux.x11.utils.LenovoPenButtonListener;
+ 
+ import java.util.Set;
+ import java.util.concurrent.Executor;
+@@ -351,6 +352,7 @@ public class LorieView extends SurfaceView implements InputStub {
+     private Callback mCallback;
+     private final Point p = new Point();
+     boolean commitedText = false;
++    private LenovoPenButtonListener mPenListener;
+     private TouchInputHandler mTouchInputHandler;
+     private final InputConnection mConnection = new InputConnectionWrapper(new BaseInputConnection(this, false) {
+         private final MainActivity a = MainActivity.getInstance();
+@@ -627,6 +629,20 @@ public class LorieView extends SurfaceView implements InputStub {
+     private void init() {
+         getHolder().addCallback(mSurfaceCallback);
+         clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
++        mPenListener = new LenovoPenButtonListener(event -> {
++            if (event == LenovoPenButtonListener.PenButtonEvent.DOUBLE_CLICK) {
++                // Toggle virtual stylus button 1 (press/release)
++                long duration = TouchInputHandler.toggleVirtualStylusButton1();
++                String state = TouchInputHandler.isVirtualButton1Pressed() ? "PRESSED" : "RELEASED";
++                Log.d("LenovoPen", "Pen button double-click detected, button 1 now: " + state);
++                
++                // Show toast notification
++                String message = TouchInputHandler.isVirtualButton1Pressed() 
++                    ? "Stylus Button 1: ON" 
++                    : String.format("Stylus Button 1: OFF (held for %.3fs)", duration / 1000.0);
++                android.widget.Toast.makeText(getContext(), message, android.widget.Toast.LENGTH_SHORT).show();
++            }
++        });
+ 
+         nativeInit();
+     }
+@@ -759,7 +775,7 @@ public class LorieView extends SurfaceView implements InputStub {
+ 
+     @Override
+     public boolean dispatchKeyEventPreIme(KeyEvent event) {
+-        if (mPenListener.onKeyDown(event.getKeyCode(), event)) {
++        if (event.getAction() == KeyEvent.ACTION_DOWN && mPenListener.onKeyDown(event.getKeyCode(), event)) {
+             return true;
+         }
+         if (imeBuggyKeys.contains(event.getKeyCode())) {
+@@ -779,9 +795,6 @@ public class LorieView extends SurfaceView implements InputStub {
+ 
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent event) {
+-        if (mPenListener.onKeyDown(event.getKeyCode(), event)) {
+-            return true;
+-        }
+         if (imeBuggyKeys.contains(event.getKeyCode())) {
+             // remove messages we posted in dispatchKeyEventPreIme
+             int action = event.getAction();
+diff --git a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
+index 0000000..0000000 100644
+--- a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
++++ b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
+@@ -54,6 +54,8 @@ public class TouchInputHandler {
+     private static final float EPSILON = 0.001f;
+ 
+     public static int STYLUS_INPUT_HELPER_MODE = 1; // 1 = Left Click, 2 Middle Click, 4 Right Click
++    private static int virtualStylusButton = 0; // Virtual button state (bit flags: 1=button1, 2=button2, 4=button3)
++    private static long button1PressedTimestamp = 0; // Timestamp when button 1 was pressed
+ 
+     /**
+      * Used to set/store the selected input mode.
+@@ -242,6 +244,24 @@ public class TouchInputHandler {
+ 
+     public float[] getLastStylusCoords() {
+         return mStylusListener.getLastCoords();
++    }
++
++    public static long toggleVirtualStylusButton1() {
++        long duration = 0;
++        if ((virtualStylusButton & 4) != 0) {
++            // Button is currently pressed, release it
++            virtualStylusButton &= ~4;
++            duration = System.currentTimeMillis() - button1PressedTimestamp;
++            android.util.Log.d("LenovoPen", "Virtual stylus button 1 RELEASED (held for " + duration + "ms)");
++        } else {
++            // Button is currently released, press it
++            virtualStylusButton |= 4;
++            button1PressedTimestamp = System.currentTimeMillis();
++            android.util.Log.d("LenovoPen", "Virtual stylus button 1 PRESSED");
++        }
++        return duration;
++    }
++
++    public static boolean isVirtualButton1Pressed() {
++        return (virtualStylusButton & 4) != 0;
+     }
+ 
+     static public void refreshInputDevices() {
+@@ -1044,7 +1064,9 @@ public class TouchInputHandler {
+                 tiltY = (int) Math.round((float) Math.asin(Math.cos(orientation) * Math.sin(tilt)) * 63.5 - 0.5);
+             }
+ 
+-            android.util.Log.d("STYLUS_EVENT", "action " + action + " x " + newX + " y " + newY + " pressure " + e.getPressure() + " tilt " + e.getAxisValue(MotionEvent.AXIS_TILT) + " orientation " + e.getAxisValue(MotionEvent.AXIS_ORIENTATION) + " buttonState " + e.getButtonState() + " extractedButtons " + newButtons);
++            // Merge physical buttons with virtual button
++            int finalButtons = newButtons | virtualStylusButton;
++            android.util.Log.d("STYLUS_EVENT", "action " + action + " x " + newX + " y " + newY + " pressure " + e.getPressure() + " tilt " + e.getAxisValue(MotionEvent.AXIS_TILT) + " orientation " + e.getAxisValue(MotionEvent.AXIS_ORIENTATION) + " buttonState " + e.getButtonState() + " extractedButtons " + newButtons + " virtualButton " + virtualStylusButton + " finalButtons " + finalButtons);
+             mInjector.sendStylusEvent(
+                     x = newX,
+                     y = newY,
+@@ -1052,7 +1074,7 @@ public class TouchInputHandler {
+                     tiltX,
+                     tiltY,
+                     convertOrientation(orientation),
+-                    buttons = newButtons,
++                    buttons = finalButtons,
+                     e.getToolType(e.getActionIndex()) == MotionEvent.TOOL_TYPE_ERASER,
+                     mInjector.stylusIsMouse);
+ 
+diff --git a/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java b/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java
+@@ -0,0 +1,95 @@
++
++package com.termux.x11.utils;
++
++import android.view.KeyEvent;
++
++import java.util.function.Consumer;
++
++/**
++ * PORTABLE IMPLEMENTATION FOR OTHER APPS
++ * 
++ * Simple listener for Lenovo Pen Plus button presses via KeyEvent detection.
++ * Copy this file to any Android project to detect stylus button presses.
++ * 
++ * REQUIREMENTS:
++ * - None! No permissions, no Shizuku, no special setup
++ * - Works on Lenovo tablets with Pen Plus stylus
++ * - App must be in foreground to receive events
++ * 
++ * KNOWN WORKING:
++ * - ✅ Double-click (keycode 601)
++ * 
++ * UNTESTED:
++ * - Single-click (600)
++ * - Triple-click (602)
++ * - Long press (603, 604)
++ * 
++ * USAGE:
++ * ```kotlin
++ * class MainActivity : AppCompatActivity() {
++ *     private val penListener = LenovoPenButtonListener { event ->
++ *         when (event) {
++ *             PenButtonEvent.SINGLE_CLICK -> handleSingleClick()
++ *             PenButtonEvent.DOUBLE_CLICK -> handleDoubleClick()
++ *             PenButtonEvent.TRIPLE_CLICK -> handleTripleClick()
++ *             PenButtonEvent.LONG_PRESS -> handleLongPress()
++ *         }
++ *     }
++ *     
++ *     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
++ *         if (penListener.onKeyDown(keyCode, event)) {
++ *             return true  // Event was handled
++ *         }
++ *         return super.onKeyDown(keyCode, event)
++ *     }
++ * }
++ * ```
++ */
++public class LenovoPenButtonListener {
++
++    private final Consumer<PenButtonEvent> onButtonPressed;
++
++    public LenovoPenButtonListener(Consumer<PenButtonEvent> onButtonPressed) {
++        this.onButtonPressed = onButtonPressed;
++    }
++
++    /**
++     * Call this from your Activity's onKeyDown() method
++     * Returns true if the event was a pen button press and was handled
++     */
++    public boolean onKeyDown(int keyCode, KeyEvent event) {
++        if (event == null) return false;
++
++        PenButtonEvent buttonEvent;
++        switch (keyCode) {
++            case 600:
++                buttonEvent = PenButtonEvent.SINGLE_CLICK;
++                break;
++            case 601:
++                buttonEvent = PenButtonEvent.DOUBLE_CLICK;
++                break;
++            case 602:
++                buttonEvent = PenButtonEvent.TRIPLE_CLICK;
++                break;
++            case 603:
++            case 604:
++                buttonEvent = PenButtonEvent.LONG_PRESS;
++                break;
++            default:
++                return false;
++        }
++
++        onButtonPressed.accept(buttonEvent);
++        return true;  // Consume the event
++    }
++
++    /**
++     * Pen button events
++     */
++    public enum PenButtonEvent {
++        SINGLE_CLICK,
++        DOUBLE_CLICK,
++        TRIPLE_CLICK,
++        LONG_PRESS
++    }
++}
+diff --git a/build.gradle b/build.gradle
+index 0000000..0000000 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -8,7 +8,7 @@ buildscript {
+     dependencies {
+         // NOTE: Do not place your application dependencies here; they belong
+         // in the individual module build.gradle files
+-        classpath 'com.android.tools.build:gradle:8.13.1'
++        classpath 'com.android.tools.build:gradle:8.13.2'
+     }
+ }
+ 

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">LenovoPenPlusDebug</string>
+    <string name="accessibility_service_description">Detects Lenovo Pen Plus button presses by monitoring UI changes (toolbox appearance, screenshots, etc.)</string>
+</resources>
