@@ -1,234 +1,615 @@
-diff --git a/app/src/main/java/com/termux/x11/LorieView.java b/app/src/main/java/com/termux/x11/LorieView.java
-index 0000000..0000000 100644
---- a/app/src/main/java/com/termux/x11/LorieView.java
-+++ b/app/src/main/java/com/termux/x11/LorieView.java
-@@ -49,6 +49,7 @@ import androidx.core.math.MathUtils;
+diff --git a/app/src/main/java/com/termux/x11/LoriePreferences.java b/app/src/main/java/com/termux/x11/LoriePreferences.java
+index 332575c..7643908 100644
+--- a/app/src/main/java/com/termux/x11/LoriePreferences.java
++++ b/app/src/main/java/com/termux/x11/LoriePreferences.java
+@@ -291,6 +291,7 @@ public class LoriePreferences extends AppCompatActivity implements PreferenceFra
+             setVisible("showStylusClickOverride", stylusAvailable);
+             setVisible("stylusIsMouse", stylusAvailable);
+             setVisible("stylusButtonContactModifierMode", stylusAvailable);
++                setVisible("lenovoPenMapping", stylusAvailable);
+ 
+             setNoActionOptionText(findPreference("volumeDownAction"), "android volume control");
+             setNoActionOptionText(findPreference("volumeUpAction"), "android volume control");
+@@ -319,6 +320,20 @@ public class LoriePreferences extends AppCompatActivity implements PreferenceFra
+                 p.setEnabled(value);
+         }
+ 
++        private void ensureLenovoDefaults() {
++            ensureListDefault(prefs.lenovoPenSingleTarget, "0");
++            ensureListDefault(prefs.lenovoPenDoubleTarget, "0");
++            ensureListDefault(prefs.lenovoPenTripleTarget, "0");
++            ensureListDefault(prefs.lenovoPenLongTarget, "0");
++            ensureListDefault(prefs.lenovoPenLongClickTarget, "0");
++        }
++
++        private void ensureListDefault(PrefsProto.ListPreference pref, String fallback) {
++            String value = pref.get();
++            if (value == null || value.isEmpty())
++                pref.put(fallback);
++        }
++
+         @SuppressWarnings("ConstantConditions")
+         void updatePreferencesLayout() {
+             if (getContext() == null)
+@@ -349,6 +364,12 @@ public class LoriePreferences extends AppCompatActivity implements PreferenceFra
+ 
+             setEnabled("scaleTouchpad", "1".equals(prefs.touchMode.get()) && !"native".equals(prefs.displayResolutionMode.get()));
+             setEnabled("showMouseHelper", "1".equals(prefs.touchMode.get()));
++                ensureLenovoDefaults();
++                setEnabled("lenovoPenSingleDuration", !prefs.lenovoPenSingleMode.get());
++                setEnabled("lenovoPenDoubleDuration", !prefs.lenovoPenDoubleMode.get());
++                setEnabled("lenovoPenTripleDuration", !prefs.lenovoPenTripleMode.get());
++                setEnabled("lenovoPenLongDuration", !prefs.lenovoPenLongMode.get());
++                setEnabled("lenovoPenLongClickDuration", !prefs.lenovoPenLongClickMode.get());
+ 
+             boolean requestNotificationPermissionVisible =
+                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+@@ -746,8 +767,15 @@ public class LoriePreferences extends AppCompatActivity implements PreferenceFra
+             public boolean get() {
+                 if ("storeSecondaryDisplayPreferencesSeparately".contentEquals(key))
+                     return builtInDisplayPreferences.getBoolean(key, (boolean) defValue);
+-
+-                return preferences.getBoolean(key, (boolean) defValue);
++                try {
++                    return preferences.getBoolean(key, (boolean) defValue);
++                } catch (ClassCastException e) {
++                    // Gracefully migrate old string/list values (e.g. "press"/"toggle") to booleans.
++                    String raw = preferences.getString(key, null);
++                    boolean value = raw != null && !"press".equals(raw) && !"false".equalsIgnoreCase(raw);
++                    preferences.edit().putBoolean(key, value).commit();
++                    return value;
++                }
+             }
+ 
+             public void put(boolean v) {
+diff --git a/app/src/main/java/com/termux/x11/MainActivity.java b/app/src/main/java/com/termux/x11/MainActivity.java
+index 40cb0cc..1405f1f 100644
+--- a/app/src/main/java/com/termux/x11/MainActivity.java
++++ b/app/src/main/java/com/termux/x11/MainActivity.java
+@@ -63,6 +63,7 @@ import androidx.viewpager.widget.ViewPager;
  import com.termux.x11.input.InputEventSender;
  import com.termux.x11.input.InputStub;
  import com.termux.x11.input.TouchInputHandler;
-+import com.termux.x11.utils.LenovoPenButtonListener;
++import com.termux.x11.input.LenovoPenButtonMapper;
+ import com.termux.x11.utils.FullscreenWorkaround;
+ import com.termux.x11.utils.KeyInterceptor;
+ import com.termux.x11.utils.SamsungDexUtils;
+@@ -80,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
+     public static Handler handler = new Handler();
+     FrameLayout frm;
+     private TouchInputHandler mInputHandler;
++    private LenovoPenButtonMapper lenovoPenMapper;
+     protected ICmdEntryInterface service = null;
+     public TermuxX11ExtraKeys mExtraKeys;
+     private Notification mNotification;
+@@ -175,6 +177,7 @@ public class MainActivity extends AppCompatActivity {
+         View lorieParent = (View) lorieView.getParent();
  
- import java.util.Set;
- import java.util.concurrent.Executor;
-@@ -351,6 +352,7 @@ public class LorieView extends SurfaceView implements InputStub {
-     private Callback mCallback;
-     private final Point p = new Point();
-     boolean commitedText = false;
-+    private LenovoPenButtonListener mPenListener;
-     private TouchInputHandler mTouchInputHandler;
-     private final InputConnection mConnection = new InputConnectionWrapper(new BaseInputConnection(this, false) {
-         private final MainActivity a = MainActivity.getInstance();
-@@ -627,6 +629,20 @@ public class LorieView extends SurfaceView implements InputStub {
-     private void init() {
-         getHolder().addCallback(mSurfaceCallback);
-         clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-+        mPenListener = new LenovoPenButtonListener(event -> {
-+            if (event == LenovoPenButtonListener.PenButtonEvent.DOUBLE_CLICK) {
-+                // Toggle virtual stylus button 1 (press/release)
-+                long duration = TouchInputHandler.toggleVirtualStylusButton1();
-+                String state = TouchInputHandler.isVirtualButton1Pressed() ? "PRESSED" : "RELEASED";
-+                Log.d("LenovoPen", "Pen button double-click detected, button 1 now: " + state);
-+                
-+                // Show toast notification
-+                String message = TouchInputHandler.isVirtualButton1Pressed() 
-+                    ? "Stylus Button 1: ON" 
-+                    : String.format("Stylus Button 1: OFF (held for %.3fs)", duration / 1000.0);
-+                android.widget.Toast.makeText(getContext(), message, android.widget.Toast.LENGTH_SHORT).show();
-+            }
-+        });
+         mInputHandler = new TouchInputHandler(this, new InputEventSender(lorieView));
++        lenovoPenMapper = new LenovoPenButtonMapper(this, mInputHandler);
+         mLorieKeyListener = (v, k, e) -> {
+             InputDevice dev = e.getDevice();
+             boolean result = mInputHandler.sendKeyEvent(e);
+@@ -582,6 +585,8 @@ public class MainActivity extends AppCompatActivity {
+         LorieView lorieView = getLorieView();
  
-         nativeInit();
-     }
-@@ -759,7 +775,7 @@ public class LorieView extends SurfaceView implements InputStub {
+         mInputHandler.reloadPreferences(prefs);
++        if (lenovoPenMapper != null)
++            lenovoPenMapper.reloadPreferences(prefs);
+         lorieView.reloadPreferences(prefs);
  
-     @Override
-     public boolean dispatchKeyEventPreIme(KeyEvent event) {
--        if (mPenListener.onKeyDown(event.getKeyCode(), event)) {
-+        if (event.getAction() == KeyEvent.ACTION_DOWN && mPenListener.onKeyDown(event.getKeyCode(), event)) {
-             return true;
-         }
-         if (imeBuggyKeys.contains(event.getKeyCode())) {
-@@ -779,9 +795,6 @@ public class LorieView extends SurfaceView implements InputStub {
- 
-     @Override
-     public boolean dispatchKeyEvent(KeyEvent event) {
--        if (mPenListener.onKeyDown(event.getKeyCode(), event)) {
--            return true;
--        }
-         if (imeBuggyKeys.contains(event.getKeyCode())) {
-             // remove messages we posted in dispatchKeyEventPreIme
-             int action = event.getAction();
-diff --git a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
-index 0000000..0000000 100644
---- a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
-+++ b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
-@@ -54,6 +54,8 @@ public class TouchInputHandler {
-     private static final float EPSILON = 0.001f;
- 
-     public static int STYLUS_INPUT_HELPER_MODE = 1; // 1 = Left Click, 2 Middle Click, 4 Right Click
-+    private static int virtualStylusButton = 0; // Virtual button state (bit flags: 1=button1, 2=button2, 4=button3)
-+    private static long button1PressedTimestamp = 0; // Timestamp when button 1 was pressed
- 
-     /**
-      * Used to set/store the selected input mode.
-@@ -242,6 +244,24 @@ public class TouchInputHandler {
- 
-     public float[] getLastStylusCoords() {
-         return mStylusListener.getLastCoords();
-+    }
-+
-+    public static long toggleVirtualStylusButton1() {
-+        long duration = 0;
-+        if ((virtualStylusButton & 4) != 0) {
-+            // Button is currently pressed, release it
-+            virtualStylusButton &= ~4;
-+            duration = System.currentTimeMillis() - button1PressedTimestamp;
-+            android.util.Log.d("LenovoPen", "Virtual stylus button 1 RELEASED (held for " + duration + "ms)");
-+        } else {
-+            // Button is currently released, press it
-+            virtualStylusButton |= 4;
-+            button1PressedTimestamp = System.currentTimeMillis();
-+            android.util.Log.d("LenovoPen", "Virtual stylus button 1 PRESSED");
-+        }
-+        return duration;
-+    }
-+
-+    public static boolean isVirtualButton1Pressed() {
-+        return (virtualStylusButton & 4) != 0;
+         setTerminalToolbarView();
+@@ -692,6 +697,13 @@ public class MainActivity extends AppCompatActivity {
+         return mLorieKeyListener.onKey(getLorieView(), e.getKeyCode(), e);
      }
  
-     static public void refreshInputDevices() {
-@@ -1044,7 +1064,9 @@ public class TouchInputHandler {
-                 tiltY = (int) Math.round((float) Math.asin(Math.cos(orientation) * Math.sin(tilt)) * 63.5 - 0.5);
-             }
- 
--            android.util.Log.d("STYLUS_EVENT", "action " + action + " x " + newX + " y " + newY + " pressure " + e.getPressure() + " tilt " + e.getAxisValue(MotionEvent.AXIS_TILT) + " orientation " + e.getAxisValue(MotionEvent.AXIS_ORIENTATION) + " buttonState " + e.getButtonState() + " extractedButtons " + newButtons);
-+            // Merge physical buttons with virtual button
-+            int finalButtons = newButtons | virtualStylusButton;
-+            android.util.Log.d("STYLUS_EVENT", "action " + action + " x " + newX + " y " + newY + " pressure " + e.getPressure() + " tilt " + e.getAxisValue(MotionEvent.AXIS_TILT) + " orientation " + e.getAxisValue(MotionEvent.AXIS_ORIENTATION) + " buttonState " + e.getButtonState() + " extractedButtons " + newButtons + " virtualButton " + virtualStylusButton + " finalButtons " + finalButtons);
-             mInjector.sendStylusEvent(
-                     x = newX,
-                     y = newY,
-@@ -1052,7 +1074,7 @@ public class TouchInputHandler {
-                     tiltX,
-                     tiltY,
-                     convertOrientation(orientation),
--                    buttons = newButtons,
-+                    buttons = finalButtons,
-                     e.getToolType(e.getActionIndex()) == MotionEvent.TOOL_TYPE_ERASER,
-                     mInjector.stylusIsMouse);
- 
-diff --git a/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java b/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java
++    @Override
++    public boolean dispatchKeyEvent(KeyEvent event) {
++        if (lenovoPenMapper != null && lenovoPenMapper.onKeyEvent(event))
++            return true;
++        return super.dispatchKeyEvent(event);
++    }
++
+     @SuppressLint("ObsoleteSdkInt")
+     Notification buildNotification() {
+         NotificationCompat.Builder builder =  new NotificationCompat.Builder(this, getNotificationChannel(mNotificationManager))
+diff --git a/app/src/main/java/com/termux/x11/input/LenovoPenButtonListener.java b/app/src/main/java/com/termux/x11/input/LenovoPenButtonListener.java
 new file mode 100644
-index 0000000..0000000
+index 0000000..0be8d04
 --- /dev/null
-+++ b/app/src/main/java/com/termux/x11/utils/LenovoPenButtonListener.java
-@@ -0,0 +1,95 @@
-+
-+package com.termux.x11.utils;
++++ b/app/src/main/java/com/termux/x11/input/LenovoPenButtonListener.java
+@@ -0,0 +1,57 @@
++package com.termux.x11.input;
 +
 +import android.view.KeyEvent;
 +
 +import java.util.function.Consumer;
 +
-+/**
-+ * PORTABLE IMPLEMENTATION FOR OTHER APPS
-+ * 
-+ * Simple listener for Lenovo Pen Plus button presses via KeyEvent detection.
-+ * Copy this file to any Android project to detect stylus button presses.
-+ * 
-+ * REQUIREMENTS:
-+ * - None! No permissions, no Shizuku, no special setup
-+ * - Works on Lenovo tablets with Pen Plus stylus
-+ * - App must be in foreground to receive events
-+ * 
-+ * KNOWN WORKING:
-+ * - ✅ Double-click (keycode 601)
-+ * 
-+ * UNTESTED:
-+ * - Single-click (600)
-+ * - Triple-click (602)
-+ * - Long press (603, 604)
-+ * 
-+ * USAGE:
-+ * ```kotlin
-+ * class MainActivity : AppCompatActivity() {
-+ *     private val penListener = LenovoPenButtonListener { event ->
-+ *         when (event) {
-+ *             PenButtonEvent.SINGLE_CLICK -> handleSingleClick()
-+ *             PenButtonEvent.DOUBLE_CLICK -> handleDoubleClick()
-+ *             PenButtonEvent.TRIPLE_CLICK -> handleTripleClick()
-+ *             PenButtonEvent.LONG_PRESS -> handleLongPress()
-+ *         }
-+ *     }
-+ *     
-+ *     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-+ *         if (penListener.onKeyDown(keyCode, event)) {
-+ *             return true  // Event was handled
-+ *         }
-+ *         return super.onKeyDown(keyCode, event)
-+ *     }
-+ * }
-+ * ```
-+ */
-+public class LenovoPenButtonListener {
-+
++public final class LenovoPenButtonListener {
 +    private final Consumer<PenButtonEvent> onButtonPressed;
++    private final Consumer<String> onDebug;
++    private Integer pendingKeyCode;
++    private long lastEmittedAt;
 +
-+    public LenovoPenButtonListener(Consumer<PenButtonEvent> onButtonPressed) {
++    public LenovoPenButtonListener(Consumer<PenButtonEvent> onButtonPressed, Consumer<String> onDebug) {
 +        this.onButtonPressed = onButtonPressed;
++        this.onDebug = onDebug;
 +    }
 +
-+    /**
-+     * Call this from your Activity's onKeyDown() method
-+     * Returns true if the event was a pen button press and was handled
-+     */
-+    public boolean onKeyDown(int keyCode, KeyEvent event) {
-+        if (event == null) return false;
++    public boolean onKeyEvent(KeyEvent event) {
++        if (event == null)
++            return false;
 +
-+        PenButtonEvent buttonEvent;
-+        switch (keyCode) {
-+            case 600:
-+                buttonEvent = PenButtonEvent.SINGLE_CLICK;
-+                break;
-+            case 601:
-+                buttonEvent = PenButtonEvent.DOUBLE_CLICK;
-+                break;
-+            case 602:
-+                buttonEvent = PenButtonEvent.TRIPLE_CLICK;
-+                break;
-+            case 603:
-+            case 604:
-+                buttonEvent = PenButtonEvent.LONG_PRESS;
-+                break;
++        PenButtonEvent penEvent = PenButtonEvent.fromKeyCode(event.getKeyCode());
++        if (penEvent == null)
++            return false;
++
++        if (event.getRepeatCount() > 0)
++            return true;
++
++        switch (event.getAction()) {
++            case KeyEvent.ACTION_DOWN:
++                pendingKeyCode = event.getKeyCode();
++                debug("Pen button DOWN code=" + event.getKeyCode());
++                return true;
++            case KeyEvent.ACTION_UP:
++                int codeToEmit = pendingKeyCode != null ? pendingKeyCode : event.getKeyCode();
++                pendingKeyCode = null;
++                PenButtonEvent toSend = PenButtonEvent.fromKeyCode(codeToEmit);
++                if (toSend != null && event.getEventTime() != lastEmittedAt) {
++                    lastEmittedAt = event.getEventTime();
++                    onButtonPressed.accept(toSend);
++                    debug("Pen button UP code=" + codeToEmit + " -> " + toSend);
++                }
++                return true;
 +            default:
 +                return false;
 +        }
-+
-+        onButtonPressed.accept(buttonEvent);
-+        return true;  // Consume the event
 +    }
 +
-+    /**
-+     * Pen button events
-+     */
-+    public enum PenButtonEvent {
-+        SINGLE_CLICK,
-+        DOUBLE_CLICK,
-+        TRIPLE_CLICK,
-+        LONG_PRESS
++    public boolean onKeyUp(int keyCode, KeyEvent event) {
++        return onKeyEvent(event);
++    }
++
++    private void debug(String message) {
++        if (onDebug != null)
++            onDebug.accept(message);
 +    }
 +}
-diff --git a/build.gradle b/build.gradle
-index 0000000..0000000 100644
---- a/build.gradle
-+++ b/build.gradle
-@@ -8,7 +8,7 @@ buildscript {
-     dependencies {
-         // NOTE: Do not place your application dependencies here; they belong
-         // in the individual module build.gradle files
--        classpath 'com.android.tools.build:gradle:8.13.1'
-+        classpath 'com.android.tools.build:gradle:8.13.2'
+diff --git a/app/src/main/java/com/termux/x11/input/LenovoPenButtonMapper.java b/app/src/main/java/com/termux/x11/input/LenovoPenButtonMapper.java
+new file mode 100644
+index 0000000..351fadb
+--- /dev/null
++++ b/app/src/main/java/com/termux/x11/input/LenovoPenButtonMapper.java
+@@ -0,0 +1,137 @@
++package com.termux.x11.input;
++
++import android.content.Context;
++import android.os.Handler;
++import android.os.Looper;
++import android.view.KeyEvent;
++import android.widget.Toast;
++
++import com.termux.x11.Prefs;
++
++import java.util.EnumMap;
++import java.util.Map;
++import java.util.Locale;
++
++public final class LenovoPenButtonMapper {
++    private static final String TAG = "LenovoPenMapper";
++
++    private final Context context;
++    private final TouchInputHandler inputHandler;
++    private final LenovoPenButtonListener listener;
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    private final Map<PenButtonEvent, GestureConfig> configs = new EnumMap<>(PenButtonEvent.class);
++    private final Map<PenButtonEvent, Runnable> pendingReleases = new EnumMap<>(PenButtonEvent.class);
++    private boolean showDetections;
++
++    public LenovoPenButtonMapper(Context context, TouchInputHandler inputHandler) {
++        this.context = context.getApplicationContext();
++        this.inputHandler = inputHandler;
++        this.listener = new LenovoPenButtonListener(this::handlePenEvent, msg -> android.util.Log.d(TAG, msg));
++    }
++
++    public boolean onKeyEvent(KeyEvent event) {
++        return listener.onKeyEvent(event);
++    }
++
++    public void reloadPreferences(Prefs prefs) {
++        showDetections = prefs.lenovoPenShowDetections.get();
++
++        configs.put(PenButtonEvent.SINGLE_PRESS, buildConfig(
++            prefs.lenovoPenSingleTarget.get(),
++            prefs.lenovoPenSingleMode.get(),
++            prefs.lenovoPenSingleDuration.get()));
++        configs.put(PenButtonEvent.DOUBLE_PRESS, buildConfig(
++            prefs.lenovoPenDoubleTarget.get(),
++            prefs.lenovoPenDoubleMode.get(),
++            prefs.lenovoPenDoubleDuration.get()));
++        configs.put(PenButtonEvent.TRIPLE_PRESS, buildConfig(
++            prefs.lenovoPenTripleTarget.get(),
++            prefs.lenovoPenTripleMode.get(),
++            prefs.lenovoPenTripleDuration.get()));
++        configs.put(PenButtonEvent.LONG_PRESS, buildConfig(
++            prefs.lenovoPenLongTarget.get(),
++            prefs.lenovoPenLongMode.get(),
++            prefs.lenovoPenLongDuration.get()));
++        configs.put(PenButtonEvent.LONG_PRESS_AND_CLICK, buildConfig(
++            prefs.lenovoPenLongClickTarget.get(),
++            prefs.lenovoPenLongClickMode.get(),
++            prefs.lenovoPenLongClickDuration.get()));
++    }
++
++        private GestureConfig buildConfig(String targetValue, boolean toggleMode, int durationMs) {
++        GestureConfig config = new GestureConfig();
++        config.buttonMask = parseMask(targetValue);
++        config.mode = toggleMode ? Mode.TOGGLE : Mode.PRESS;
++        config.durationMs = Math.max(10, durationMs);
++        return config;
++    }
++
++    private int parseMask(String value) {
++        try {
++            return Integer.parseInt(value);
++        } catch (NumberFormatException e) {
++            return 0;
++        }
++    }
++
++    private void handlePenEvent(PenButtonEvent event) {
++        GestureConfig config = configs.get(event);
++        if (config == null)
++            return;
++
++        if (showDetections)
++            showDetection(event);
++
++        if (config.buttonMask == 0)
++            return;
++
++        switch (config.mode) {
++            case TOGGLE:
++                applyToggle(config.buttonMask);
++                break;
++            case PRESS:
++            default:
++                applyPress(config.buttonMask, config.durationMs, event);
++                break;
++        }
++    }
++
++    private void applyToggle(int mask) {
++        StylusState state = inputHandler.getLastStylusState();
++        int updated = state.buttons ^ mask;
++        inputHandler.sendStylusButtons(updated);
++    }
++
++    private void applyPress(int mask, int durationMs, PenButtonEvent key) {
++        StylusState before = inputHandler.getLastStylusState();
++        boolean maskWasSet = (before.buttons & mask) != 0;
++        inputHandler.sendStylusButtons(before.buttons | mask);
++
++        Runnable release = () -> {
++            StylusState current = inputHandler.getLastStylusState();
++            int releaseButtons = current.buttons;
++            if (maskWasSet)
++                releaseButtons |= mask;
++            else
++                releaseButtons &= ~mask;
++            inputHandler.sendStylusButtons(releaseButtons);
++        };
++
++        Runnable pending = pendingReleases.put(key, release);
++        if (pending != null)
++            handler.removeCallbacks(pending);
++        handler.postDelayed(release, durationMs);
++    }
++
++    private void showDetection(PenButtonEvent event) {
++        Toast.makeText(context, "Lenovo Pen: " + event.name().replace('_', ' ').toLowerCase(Locale.US), Toast.LENGTH_SHORT).show();
++    }
++
++    private enum Mode { TOGGLE, PRESS }
++
++    private static final class GestureConfig {
++        int buttonMask;
++        Mode mode;
++        int durationMs;
++    }
++}
+diff --git a/app/src/main/java/com/termux/x11/input/PenButtonEvent.java b/app/src/main/java/com/termux/x11/input/PenButtonEvent.java
+new file mode 100644
+index 0000000..425b0a8
+--- /dev/null
++++ b/app/src/main/java/com/termux/x11/input/PenButtonEvent.java
+@@ -0,0 +1,29 @@
++package com.termux.x11.input;
++
++import java.util.HashMap;
++import java.util.Map;
++
++public enum PenButtonEvent {
++    SINGLE_PRESS(600),
++    DOUBLE_PRESS(601),
++    TRIPLE_PRESS(602),
++    LONG_PRESS(603),
++    LONG_PRESS_AND_CLICK(604);
++
++    private static final Map<Integer, PenButtonEvent> LOOKUP = new HashMap<>();
++
++    static {
++        for (PenButtonEvent event : values())
++            LOOKUP.put(event.keyCode, event);
++    }
++
++    public final int keyCode;
++
++    PenButtonEvent(int keyCode) {
++        this.keyCode = keyCode;
++    }
++
++    public static PenButtonEvent fromKeyCode(int keyCode) {
++        return LOOKUP.get(keyCode);
++    }
++}
+diff --git a/app/src/main/java/com/termux/x11/input/StylusState.java b/app/src/main/java/com/termux/x11/input/StylusState.java
+new file mode 100644
+index 0000000..5b60b3a
+--- /dev/null
++++ b/app/src/main/java/com/termux/x11/input/StylusState.java
+@@ -0,0 +1,40 @@
++package com.termux.x11.input;
++
++public final class StylusState {
++    public float x;
++    public float y;
++    public int pressure;
++    public int tiltX;
++    public int tiltY;
++    public int orientation;
++    public int buttons;
++    public boolean eraser;
++    public boolean mouse;
++
++    public StylusState() {
++    }
++
++    public StylusState copy() {
++        StylusState copy = new StylusState();
++        copy.setFrom(this);
++        return copy;
++    }
++
++    public StylusState withButtons(int newButtons) {
++        StylusState copy = copy();
++        copy.buttons = newButtons;
++        return copy;
++    }
++
++    public void setFrom(StylusState other) {
++        x = other.x;
++        y = other.y;
++        pressure = other.pressure;
++        tiltX = other.tiltX;
++        tiltY = other.tiltY;
++        orientation = other.orientation;
++        buttons = other.buttons;
++        eraser = other.eraser;
++        mouse = other.mouse;
++    }
++}
+diff --git a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
+index d49ebc6..4344cec 100644
+--- a/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
++++ b/app/src/main/java/com/termux/x11/input/TouchInputHandler.java
+@@ -92,6 +92,7 @@ public class TouchInputHandler {
+     private final InputEventSender mInjector;
+     private final MainActivity mActivity;
+     private final DisplayMetrics mMetrics = new DisplayMetrics();
++    private final StylusState lastStylusState = new StylusState();
+ 
+     private final BiConsumer<Integer, Boolean> noAction = (key, down) -> {};
+     private BiConsumer<Integer, Boolean> swipeUpAction = noAction, swipeDownAction = noAction,
+@@ -174,6 +175,10 @@ public class TouchInputHandler {
+         mRenderData = renderData != null ? renderData :new RenderData();
+         mInjector = injector;
+         mActivity = activity;
++        PointF cursor = mRenderData.getCursorPosition();
++        lastStylusState.x = cursor.x;
++        lastStylusState.y = cursor.y;
++        lastStylusState.mouse = mInjector.stylusIsMouse;
+         if (mDisplayManager == null) {
+             mDisplayManager = (DisplayManager) mActivity.getSystemService(Context.DISPLAY_SERVICE);
+             mDisplayRotation = mDisplayManager.getDisplay(Display.DEFAULT_DISPLAY).getRotation() % 4;
+@@ -408,6 +413,34 @@ public class TouchInputHandler {
+         }
      }
- }
+ 
++    public StylusState getLastStylusState() {
++        return lastStylusState.copy();
++    }
++
++    public void sendStylusState(StylusState state) {
++        if (state == null)
++            return;
++
++        StylusState next = state.copy();
++        if (Float.isNaN(next.x) || Float.isNaN(next.y)) {
++            PointF cursor = mRenderData.getCursorPosition();
++            next.x = cursor.x;
++            next.y = cursor.y;
++        }
++
++        if (!next.mouse)
++            next.mouse = mInjector.stylusIsMouse;
++
++        lastStylusState.setFrom(next);
++        mInjector.sendStylusEvent(next.x, next.y, next.pressure, next.tiltX, next.tiltY, next.orientation, next.buttons, next.eraser, next.mouse);
++    }
++
++    public void sendStylusButtons(int newButtons) {
++        StylusState next = getLastStylusState();
++        next.buttons = newButtons;
++        sendStylusState(next);
++    }
++
+     public static boolean isExternal(InputDevice d) {
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+             return d.isExternal();
+@@ -432,6 +465,7 @@ public class TouchInputHandler {
+         mInjector.capturedPointerSpeedFactor = ((float) p.capturedPointerSpeedFactor.get())/100;
+         mInjector.dexMetaKeyCapture = p.dexMetaKeyCapture.get();
+         mInjector.stylusIsMouse = p.stylusIsMouse.get();
++        lastStylusState.mouse = mInjector.stylusIsMouse;
+         mInjector.stylusButtonContactModifierMode = p.stylusButtonContactModifierMode.get();
+         mInjector.pauseKeyInterceptingWithEsc = p.pauseKeyInterceptingWithEsc.get();
+         switch (p.transformCapturedPointer.get()) {
+@@ -972,16 +1006,21 @@ public class TouchInputHandler {
+             }
+ 
+             android.util.Log.d("STYLUS_EVENT", "action " + action + " x " + newX + " y " + newY + " pressure " + e.getPressure() + " tilt " + e.getAxisValue(MotionEvent.AXIS_TILT) + " orientation " + e.getAxisValue(MotionEvent.AXIS_ORIENTATION) + " buttonState " + e.getButtonState() + " extractedButtons " + newButtons);
+-            mInjector.sendStylusEvent(
+-                    x = newX,
+-                    y = newY,
+-                    (int) ((pressure = e.getPressure()) * 65535),
+-                    tiltX,
+-                    tiltY,
+-                    convertOrientation(orientation),
+-                    buttons = newButtons,
+-                    e.getToolType(e.getActionIndex()) == MotionEvent.TOOL_TYPE_ERASER,
+-                    mInjector.stylusIsMouse);
++                StylusState state = new StylusState();
++                x = newX;
++                y = newY;
++                pressure = e.getPressure();
++                buttons = newButtons;
++                state.x = x;
++                state.y = y;
++                state.pressure = (int) (pressure * 65535);
++                state.tiltX = tiltX;
++                state.tiltY = tiltY;
++                state.orientation = convertOrientation(orientation);
++                state.buttons = newButtons;
++                state.eraser = e.getToolType(e.getActionIndex()) == MotionEvent.TOOL_TYPE_ERASER;
++                state.mouse = mInjector.stylusIsMouse;
++                sendStylusState(state);
+ 
+             return true;
+         }
+diff --git a/app/src/main/res/values/arrays.xml b/app/src/main/res/values/arrays.xml
+index 45973b6..45ffdf4 100644
+--- a/app/src/main/res/values/arrays.xml
++++ b/app/src/main/res/values/arrays.xml
+@@ -85,4 +85,22 @@
+         <item>reverse portrait</item>
+         <item>reverse landscape</item>
+     </string-array>
++    <string-array name="lenovoPenButtonEntries">
++        <item>Disabled</item>
++        <item>Barrel primary (button 3 / right click)</item>
++        <item>Barrel secondary (button 2 / middle click)</item>
++    </string-array>
++    <string-array name="lenovoPenButtonValues">
++        <item>0</item>
++        <item>4</item>
++        <item>2</item>
++    </string-array>
++    <string-array name="lenovoPenModeEntries">
++        <item>Press and release</item>
++        <item>Toggle target button</item>
++    </string-array>
++    <string-array name="lenovoPenModeValues">
++        <item>press</item>
++        <item>toggle</item>
++    </string-array>
+ </resources>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 0405e61..c9b1ba4 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -66,6 +66,34 @@ E.g. <b>META</b> for <i>META key</i>, \n
+     <string name="pref_transformCapturedPointer">Transform captured pointer movements</string>
+     <string name="pref_capturedPointerSpeedFactor">Captured pointer speed factor, %</string>
+     <string name="pref_tapToMove">Enable tap-to-move for touchpads</string>
++    <string name="pref_lenovoPen">Lenovo Pen mapping</string>
++    <string name="pref_lenovoPenMapping">Lenovo Pen mapping</string>
++    <string name="pref_lenovoPenGestures">Lenovo Pen gestures</string>
++    <string name="pref_lenovoPenShowDetections">Show detections on screen</string>
++    <string name="pref_lenovoPenShowDetections_summary">Briefly show detected Lenovo Pen gestures while remapping.</string>
++    <string name="pref_lenovoPenSingleHeader">Single press</string>
++        <string name="pref_lenovoPenModeToggle">Toggle target button</string>
++        <string name="pref_lenovoPenModeToggle_on">Toggle: switch the mapped button on/off</string>
++        <string name="pref_lenovoPenModeToggle_off">Press: hold for the specified duration</string>
++    <string name="pref_lenovoPenSingleTarget">Single press target button</string>
++    <string name="pref_lenovoPenSingleMode">Toggle target button</string>
++    <string name="pref_lenovoPenSingleDuration">Single press duration (ms)</string>
++    <string name="pref_lenovoPenDoubleHeader">Double press</string>
++    <string name="pref_lenovoPenDoubleTarget">Double press target button</string>
++    <string name="pref_lenovoPenDoubleMode">Toggle target button</string>
++    <string name="pref_lenovoPenDoubleDuration">Double press duration (ms)</string>
++    <string name="pref_lenovoPenTripleHeader">Triple press</string>
++    <string name="pref_lenovoPenTripleTarget">Triple press target button</string>
++    <string name="pref_lenovoPenTripleMode">Toggle target button</string>
++    <string name="pref_lenovoPenTripleDuration">Triple press duration (ms)</string>
++    <string name="pref_lenovoPenLongHeader">Long press</string>
++    <string name="pref_lenovoPenLongTarget">Long press target button</string>
++    <string name="pref_lenovoPenLongMode">Toggle target button</string>
++    <string name="pref_lenovoPenLongDuration">Long press duration (ms)</string>
++    <string name="pref_lenovoPenLongClickHeader">Long press + click</string>
++    <string name="pref_lenovoPenLongClickTarget">Long press + click target button</string>
++    <string name="pref_lenovoPenLongClickMode">Toggle target button</string>
++    <string name="pref_lenovoPenLongClickDuration">Long press + click duration (ms)</string>
+ 
+     <string name="pref_showAdditionalKbd">Show additional keyboard</string>
+     <string name="pref_showAdditionalKbd_summary">Show keyboard with additional keys.</string>
+diff --git a/app/src/main/res/xml/preferences.xml b/app/src/main/res/xml/preferences.xml
+index 4a77da3..56c6b8f 100644
+--- a/app/src/main/res/xml/preferences.xml
++++ b/app/src/main/res/xml/preferences.xml
+@@ -29,12 +29,43 @@
+         <SwitchPreferenceCompat app:key="showStylusClickOverride" app:defaultValue="false" />
+         <SwitchPreferenceCompat app:key="stylusIsMouse" app:defaultValue="false" />
+         <SwitchPreferenceCompat app:key="stylusButtonContactModifierMode" app:defaultValue="false" />
++        <Preference app:key="lenovoPenMapping" app:title="@string/pref_lenovoPen" app:fragment="lenovoPen" />
+         <SwitchPreferenceCompat app:key="showMouseHelper" app:defaultValue="false" />
+         <SwitchPreferenceCompat app:key="pointerCapture" app:defaultValue="false" />
+         <ListPreference app:key="transformCapturedPointer" app:defaultValue="no" app:entries="@array/transformCapturedPointerEntries" app:entryValues="@array/transformCapturedPointerValues" />
+         <SeekBarPreference app:key="capturedPointerSpeedFactor" app:defaultValue="100" app:min="1" android:max="300" app:seekBarIncrement="1" app:showSeekBarValue="true" app:updatesContinuously="true" />
+         <SwitchPreferenceCompat app:key="tapToMove" app:defaultValue="false" />
+     </PreferenceScreen>
++    <PreferenceScreen app:key="lenovoPen">
++        <SwitchPreferenceCompat app:key="lenovoPenShowDetections" app:defaultValue="false" />
++        <PreferenceCategory app:title="@string/pref_lenovoPenGestures">
++            <PreferenceCategory app:title="@string/pref_lenovoPenSingleHeader">
++                <ListPreference app:key="lenovoPenSingleTarget" app:defaultValue="0" app:entries="@array/lenovoPenButtonEntries" app:entryValues="@array/lenovoPenButtonValues" />
++                <SwitchPreferenceCompat app:key="lenovoPenSingleMode" app:defaultValue="false" app:title="@string/pref_lenovoPenModeToggle" app:summaryOn="@string/pref_lenovoPenModeToggle_on" app:summaryOff="@string/pref_lenovoPenModeToggle_off" />
++                <SeekBarPreference app:key="lenovoPenSingleDuration" app:defaultValue="120" app:min="20" android:max="1000" app:seekBarIncrement="10" app:showSeekBarValue="true" app:updatesContinuously="true" />
++            </PreferenceCategory>
++            <PreferenceCategory app:title="@string/pref_lenovoPenDoubleHeader">
++                <ListPreference app:key="lenovoPenDoubleTarget" app:defaultValue="0" app:entries="@array/lenovoPenButtonEntries" app:entryValues="@array/lenovoPenButtonValues" />
++                <SwitchPreferenceCompat app:key="lenovoPenDoubleMode" app:defaultValue="false" app:title="@string/pref_lenovoPenModeToggle" app:summaryOn="@string/pref_lenovoPenModeToggle_on" app:summaryOff="@string/pref_lenovoPenModeToggle_off" />
++                <SeekBarPreference app:key="lenovoPenDoubleDuration" app:defaultValue="120" app:min="20" android:max="1000" app:seekBarIncrement="10" app:showSeekBarValue="true" app:updatesContinuously="true" />
++            </PreferenceCategory>
++            <PreferenceCategory app:title="@string/pref_lenovoPenTripleHeader">
++                <ListPreference app:key="lenovoPenTripleTarget" app:defaultValue="0" app:entries="@array/lenovoPenButtonEntries" app:entryValues="@array/lenovoPenButtonValues" />
++                <SwitchPreferenceCompat app:key="lenovoPenTripleMode" app:defaultValue="false" app:title="@string/pref_lenovoPenModeToggle" app:summaryOn="@string/pref_lenovoPenModeToggle_on" app:summaryOff="@string/pref_lenovoPenModeToggle_off" />
++                <SeekBarPreference app:key="lenovoPenTripleDuration" app:defaultValue="120" app:min="20" android:max="1000" app:seekBarIncrement="10" app:showSeekBarValue="true" app:updatesContinuously="true" />
++            </PreferenceCategory>
++            <PreferenceCategory app:title="@string/pref_lenovoPenLongHeader">
++                <ListPreference app:key="lenovoPenLongTarget" app:defaultValue="0" app:entries="@array/lenovoPenButtonEntries" app:entryValues="@array/lenovoPenButtonValues" />
++                <SwitchPreferenceCompat app:key="lenovoPenLongMode" app:defaultValue="false" app:title="@string/pref_lenovoPenModeToggle" app:summaryOn="@string/pref_lenovoPenModeToggle_on" app:summaryOff="@string/pref_lenovoPenModeToggle_off" />
++                <SeekBarPreference app:key="lenovoPenLongDuration" app:defaultValue="250" app:min="20" android:max="1500" app:seekBarIncrement="10" app:showSeekBarValue="true" app:updatesContinuously="true" />
++            </PreferenceCategory>
++            <PreferenceCategory app:title="@string/pref_lenovoPenLongClickHeader">
++                <ListPreference app:key="lenovoPenLongClickTarget" app:defaultValue="0" app:entries="@array/lenovoPenButtonEntries" app:entryValues="@array/lenovoPenButtonValues" />
++                <SwitchPreferenceCompat app:key="lenovoPenLongClickMode" app:defaultValue="false" app:title="@string/pref_lenovoPenModeToggle" app:summaryOn="@string/pref_lenovoPenModeToggle_on" app:summaryOff="@string/pref_lenovoPenModeToggle_off" />
++                <SeekBarPreference app:key="lenovoPenLongClickDuration" app:defaultValue="250" app:min="20" android:max="1500" app:seekBarIncrement="10" app:showSeekBarValue="true" app:updatesContinuously="true" />
++            </PreferenceCategory>
++        </PreferenceCategory>
++    </PreferenceScreen>
+     <PreferenceScreen app:key="kbd">
+         <SwitchPreferenceCompat app:key="showAdditionalKbd" app:defaultValue="true" />
+         <!-- this preference should be a part of `Prefs` but should not appear in PreferenceScreen -->
  
