@@ -57,7 +57,7 @@ This works only when the activity is in the foreground. A class: [`dev.ilamparit
 - Access vendor-specific framework APIs
 
 ### Why These Limitations Exist:
-1. **Protected Broadcast**: The `lenovo.intent.action.INPUT_DEVICE_CLICK_STATE_CHANGED` intent is `FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT`, making it impossible for third-party apps to receive
+1. **Protected Broadcast**: The `lenovo.intent.action.INPUT_DEVICE_CLICK_STATE_CHANGED` intent is part of the `protected-broadcasts`, making it impossible for third-party apps to receive
 2. **Framework-Level Processing**: Events are handled at the Android framework level before reaching app layer
 
 **It cannot modify stylus behavior.**
