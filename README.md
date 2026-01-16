@@ -75,7 +75,7 @@ This works only when the activity is in the foreground. A class: [`dev.ilamparit
 2. Open Shizuku app
 3. Follow the setup wizard to start Shizuku service
 
-### Step 3: Install this app
+### Step 2: Install this app
 
 1. Build and install the APK (or grab a build from releases):
    ```bash
@@ -85,14 +85,14 @@ This works only when the activity is in the foreground. A class: [`dev.ilamparit
 
 2. Open "LenovoPenPlusDebug" app
 
-### Step 4: Grant Permissions (optional)
+### Step 3: Grant Permissions (optional)
 
 1. The app will show "Permission Required" status
 2. Tap "Grant Shizuku Permission"
 3. Shizuku will show a permission dialog
 4. Tap "Allow"
 
-### Step 5: Start Monitoring
+### Step 4: Start Monitoring
 
 1. Tap "Start Monitoring" button
 2. Status indicator will turn green: "✅ Monitoring Active"
