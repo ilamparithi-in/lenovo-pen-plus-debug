@@ -2,6 +2,8 @@
 
 **An investigatory tool for detecting and displaying Lenovo proprietary stylus button events on Lenovo Idea Tab Pro**
 
+<img width="2944" height="1840" alt="Screenshot_20260123-192441" src="https://github.com/user-attachments/assets/594bbc7b-47cc-4938-917d-ce8e98e6c750" />
+
 ---
 
 ## What?
@@ -11,6 +13,8 @@ I first tried to detect the opening and closing of the pen toolbox that Lenovo's
 I first used **Shizuku** (ADB-level access) to monitor logcat output from the Android framework's `BluetoothPenInputPolicy` class, then found **KeyEvents** being fired in the same logcat output, so later added a detection for the firing of those events and read the gesture type by the `keyCode` (which was mapped by experimentation).
 
 ## Detection Methods
+
+<img width="2944" height="1840" alt="Screenshot_20260123-192422" src="https://github.com/user-attachments/assets/6a787997-d7cb-43ed-944d-bd140dc39810" />
 
 ### Direct observation via logcat parsing  
 - Monitors `BluetoothPenInputPolicy` framework logs
